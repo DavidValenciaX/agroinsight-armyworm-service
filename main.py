@@ -102,46 +102,6 @@ model = load_model()
 model.to(device)
 model.eval()
 
-@app.post("/predict")
-async def predict(file: UploadFile = File(...)):
-    try:
-        # Leer y validar la imagen
-        if not file.content_type.startswith("image/"):
-            return JSONResponse(
-                status_code=400,
-                content={"error": "El archivo debe ser una imagen"}
-            )
-        
-        # Leer la imagen
-        image_data = await file.read()
-        image = Image.open(io.BytesIO(image_data)).convert('RGB')
-        
-        # Preprocesar la imagen
-        img_tensor = preprocess_image(image)
-        img_tensor = img_tensor.to(device)
-        
-        # Realizar la predicción
-        with torch.no_grad():
-            outputs = model(img_tensor)
-            probabilities = torch.nn.functional.softmax(outputs, dim=1)
-            predicted_class = torch.argmax(probabilities, dim=1).item()
-            probabilities = probabilities[0].tolist()
-        
-        return {
-            "predicted_class": CLASSES[predicted_class],
-            "confidence": probabilities[predicted_class],
-            "probabilities": {
-                class_name: prob 
-                for class_name, prob in zip(CLASSES, probabilities)
-            }
-        }
-        
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Error al procesar la imagen: {str(e)}"}
-        )
-
 async def process_single_image(image_data, filename: str):
     try:
         # Validar y abrir la imagen
@@ -176,7 +136,7 @@ async def process_single_image(image_data, filename: str):
             "error": str(e)
         }
 
-@app.post("/multi-predict")
+@app.post("/predict")
 async def predict_multiple(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(
@@ -262,8 +222,7 @@ async def root():
     return {
         "message": "API de Detección de Gusano Cogollero",
         "endpoints": {
-            "/predict": "POST - Envía una imagen para analizar",
-            "/multi-predict": "POST - Envía un lote de imágenes para analizar",
+            "/predict": "POST - Envía un lote de imágenes para analizar",
             "/": "GET - Muestra esta información"
         }
     } 
