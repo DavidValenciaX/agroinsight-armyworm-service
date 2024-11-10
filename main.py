@@ -62,7 +62,7 @@ class NewHead(nn.Module):
 model.head = NewHead(in_features, num_classes)
 
 # Cargar el diccionario de estado
-model.load_state_dict(torch.load('pesos_modelo_identificacion_gusano_cogollero.pth', map_location=device, weights_only=True))
+model.load_state_dict(torch.load('pesos_modelo_identificacion_gusano_cogollero.pth', map_location=device))
 model.to(device)
 model.eval()
 
