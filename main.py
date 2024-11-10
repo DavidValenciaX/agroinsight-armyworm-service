@@ -61,8 +61,40 @@ class NewHead(nn.Module):
 
 model.head = NewHead(in_features, num_classes)
 
-# Cargar el diccionario de estado
-model.load_state_dict(torch.load('pesos_modelo_identificacion_gusano_cogollero.pth', map_location=device))
+# Cargar el modelo al iniciar la aplicación
+def load_model():
+    try:
+        # Verificar que el archivo existe
+        import os
+        model_path = 'pesos_modelo_identificacion_gusano_cogollero.pth'
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"No se encuentra el archivo de pesos: {model_path}")
+            
+        # Verificar el tamaño del archivo
+        file_size = os.path.getsize(model_path)
+        print(f"Tamaño del archivo de pesos: {file_size} bytes")
+        
+        # Intentar cargar el modelo
+        state_dict = torch.load(model_path, map_location=device)
+        
+        # Verificar que el state_dict tiene las claves esperadas
+        expected_keys = set(model.state_dict().keys())
+        loaded_keys = set(state_dict.keys())
+        if expected_keys != loaded_keys:
+            print("Advertencia: Las claves del modelo no coinciden")
+            print("Claves faltantes:", expected_keys - loaded_keys)
+            print("Claves extras:", loaded_keys - expected_keys)
+            
+        model.load_state_dict(state_dict)
+        print("Modelo cargado exitosamente")
+        return model
+        
+    except Exception as e:
+        print(f"Error al cargar el modelo: {str(e)}")
+        raise
+
+# Cargar el modelo
+model = load_model()
 model.to(device)
 model.eval()
 
