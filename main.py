@@ -1,5 +1,9 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, status
 from fastapi.responses import JSONResponse
+from typing import List
+import asyncio
+from datetime import datetime
+import uuid
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -138,12 +142,128 @@ async def predict(file: UploadFile = File(...)):
             content={"error": f"Error al procesar la imagen: {str(e)}"}
         )
 
+async def process_single_image(image_data, filename: str):
+    try:
+        # Validar y abrir la imagen
+        image = Image.open(io.BytesIO(image_data)).convert('RGB')
+        
+        # Preprocesar la imagen
+        img_tensor = preprocess_image(image)
+        img_tensor = img_tensor.to(device)
+        
+        # Realizar la predicción
+        with torch.no_grad():
+            outputs = model(img_tensor)
+            probabilities = torch.nn.functional.softmax(outputs, dim=1)
+            predicted_class = torch.argmax(probabilities, dim=1).item()
+            probabilities = probabilities[0].tolist()
+        
+        return {
+            "filename": filename,
+            "status": "success",
+            "predicted_class": CLASSES[predicted_class],
+            "confidence": probabilities[predicted_class],
+            "probabilities": {
+                class_name: prob 
+                for class_name, prob in zip(CLASSES, probabilities)
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "filename": filename,
+            "status": "error",
+            "error": str(e)
+        }
+
+@app.post("/multi-predict")
+async def predict_multiple(files: List[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se han proporcionado archivos"
+        )
+    
+    try:
+        results = []
+        tasks = []
+        
+        # Crear tareas asíncronas para procesar cada imagen
+        for file in files:
+            if not file.content_type.startswith("image/"):
+                results.append({
+                    "filename": file.filename,
+                    "status": "error",
+                    "error": "El archivo debe ser una imagen"
+                })
+                continue
+                
+            image_data = await file.read()
+            task = asyncio.create_task(process_single_image(image_data, file.filename))
+            tasks.append(task)
+        
+        # Esperar a que todas las tareas se completen
+        if tasks:
+            processed_results = await asyncio.gather(*tasks)
+            results.extend(processed_results)
+        
+        # Analizar resultados para determinar el código de estado
+        successful_predictions = [r for r in results if r["status"] == "success"]
+        failed_predictions = [r for r in results if r["status"] == "error"]
+        
+        if not results:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "message": "No se pudo procesar ninguna imagen",
+                    "results": []
+                }
+            )
+        
+        if len(successful_predictions) == len(results):
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "message": "Todas las imágenes fueron procesadas exitosamente",
+                    "results": results
+                }
+            )
+        
+        if len(failed_predictions) == len(results):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "message": "No se pudo procesar ninguna imagen",
+                    "results": results
+                }
+            )
+        
+        return JSONResponse(
+            status_code=status.HTTP_207_MULTI_STATUS,
+            content={
+                "message": "Algunas imágenes no pudieron ser procesadas",
+                "successful": len(successful_predictions),
+                "failed": len(failed_predictions),
+                "results": results
+            }
+        )
+            
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "message": "Error interno del servidor",
+                "error": str(e)
+            }
+        )
+
 @app.get("/")
 async def root():
     return {
         "message": "API de Detección de Gusano Cogollero",
         "endpoints": {
             "/predict": "POST - Envía una imagen para analizar",
+            "/multi-predict": "POST - Envía un lote de imágenes para analizar",
             "/": "GET - Muestra esta información"
         }
     } 
