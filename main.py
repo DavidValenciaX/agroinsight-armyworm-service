@@ -1,21 +1,40 @@
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, status
 from fastapi.responses import JSONResponse
 from typing import List
 import asyncio
-from datetime import datetime
-import uuid
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image
 import io
 import timm
 
+# En la configuración de FastAPI
 app = FastAPI(
     title="Gusano Cogollero API",
     description="API para detectar el estado de hojas de maíz afectadas por el gusano cogollero",
     version="1.0.0"
 )
+
+# Agregar límite de tamaño a nivel de FastAPI
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"]  # Ajustar según necesidades
+)
+
+@app.middleware("http")
+async def add_process_time_header(request, call_next):
+    # Limitar el tamaño total de la petición
+    if request.method == "POST":
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_IMAGE_SIZE * MAX_IMAGES:
+            return JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content={"detail": "Petición demasiado grande"}
+            )
+    response = await call_next(request)
+    return response
 
 # Definir las clases
 CLASSES = ['damaged_leaf', 'healthy_leaf', 'leaf_with_larva']
@@ -104,7 +123,7 @@ model.eval()
 
 async def process_single_image(image_data, filename: str):
     try:
-        # Validar y abrir la imagen
+        # Abrir la imagen en memoria
         image = Image.open(io.BytesIO(image_data)).convert('RGB')
         
         # Preprocesar la imagen
@@ -117,6 +136,11 @@ async def process_single_image(image_data, filename: str):
             probabilities = torch.nn.functional.softmax(outputs, dim=1)
             predicted_class = torch.argmax(probabilities, dim=1).item()
             probabilities = probabilities[0].tolist()
+        
+        # Limpiar memoria explícitamente
+        del image
+        del img_tensor
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
         
         return {
             "filename": filename,
@@ -136,6 +160,11 @@ async def process_single_image(image_data, filename: str):
             "error": str(e)
         }
 
+# Agregar constantes de límites
+MAX_IMAGES = 15  # Máximo número de imágenes por petición
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB por imagen
+SUPPORTED_FORMATS = {'image/jpeg', 'image/png'}
+
 @app.post("/predict")
 async def predict_multiple(files: List[UploadFile] = File(...)):
     if not files:
@@ -144,28 +173,50 @@ async def predict_multiple(files: List[UploadFile] = File(...)):
             detail="No se han proporcionado archivos"
         )
     
+    # Validar número de imágenes
+    if len(files) > MAX_IMAGES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Número máximo de imágenes permitido es {MAX_IMAGES}"
+        )
+    
     try:
         results = []
         tasks = []
         
-        # Crear tareas asíncronas para procesar cada imagen
         for file in files:
-            if not file.content_type.startswith("image/"):
+            # Validar formato
+            if file.content_type not in SUPPORTED_FORMATS:
                 results.append({
                     "filename": file.filename,
                     "status": "error",
-                    "error": "El archivo debe ser una imagen"
+                    "error": "Formato no soportado. Use JPG o PNG"
+                })
+                continue
+            
+            # Validar tamaño antes de leer el archivo
+            image_data = await file.read()
+            if len(image_data) > MAX_IMAGE_SIZE:
+                results.append({
+                    "filename": file.filename,
+                    "status": "error",
+                    "error": f"Imagen demasiado grande. Máximo {MAX_IMAGE_SIZE/1024/1024}MB"
                 })
                 continue
                 
-            image_data = await file.read()
             task = asyncio.create_task(process_single_image(image_data, file.filename))
             tasks.append(task)
         
-        # Esperar a que todas las tareas se completen
-        if tasks:
-            processed_results = await asyncio.gather(*tasks)
-            results.extend(processed_results)
+        # Procesar en lotes si hay muchas imágenes
+        BATCH_SIZE = 3  # Procesar máximo 3 imágenes simultáneamente
+        for i in range(0, len(tasks), BATCH_SIZE):
+            batch = tasks[i:i + BATCH_SIZE]
+            batch_results = await asyncio.gather(*batch)
+            results.extend(batch_results)
+            
+            # Pequeña pausa entre lotes para evitar sobrecarga
+            if i + BATCH_SIZE < len(tasks):
+                await asyncio.sleep(0.1)
         
         # Analizar resultados para determinar el código de estado
         successful_predictions = [r for r in results if r["status"] == "success"]
