@@ -12,4 +12,4 @@ RUN ls -l pesos_modelo_identificacion_gusano_cogollero.pth
 # Copiar el resto del código
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"] 
