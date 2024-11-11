@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, APIRouter
 from fastapi.responses import JSONResponse
 from typing import List
 import asyncio
@@ -10,7 +10,13 @@ from PIL import Image
 import io
 import timm
 
-# En la configuración de FastAPI
+# Create router instead of direct FastAPI app
+router = APIRouter(
+    prefix="/fall-armyworm",
+    tags=["fall armyworm analysis"]
+)
+
+# Create FastAPI app
 app = FastAPI(
     title="Gusano Cogollero API",
     description="API para detectar el estado de hojas de maíz afectadas por el gusano cogollero",
@@ -165,7 +171,8 @@ MAX_IMAGES = 15  # Máximo número de imágenes por petición
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB por imagen
 SUPPORTED_FORMATS = {'image/jpeg', 'image/png'}
 
-@app.post("/predict")
+# Change @app.post to @router.post
+@router.post("/predict")
 async def predict_multiple(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(
@@ -268,7 +275,8 @@ async def predict_multiple(files: List[UploadFile] = File(...)):
             }
         )
 
-@app.get("/")
+# Change @app.get to @router.get
+@router.get("/")
 async def root():
     return {
         "message": "API de Detección de Gusano Cogollero",
@@ -278,7 +286,8 @@ async def root():
         }
     } 
     
-@app.get("/health")
+# Change @app.get to @router.get
+@router.get("/health")
 async def health_check():
     """Endpoint para verificar que el servicio está funcionando"""
     try:
@@ -294,3 +303,6 @@ async def health_check():
             "status": "unhealthy",
             "error": str(e)
         }
+        
+# Add router to app
+app.include_router(router)
