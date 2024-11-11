@@ -277,3 +277,20 @@ async def root():
             "/": "GET - Muestra esta información"
         }
     } 
+    
+@app.get("/health")
+async def health_check():
+    """Endpoint para verificar que el servicio está funcionando"""
+    try:
+        # Intentar cargar el modelo para verificar que está disponible
+        model.eval()
+        return {
+            "status": "healthy",
+            "model_loaded": True,
+            "device": str(device)
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }
