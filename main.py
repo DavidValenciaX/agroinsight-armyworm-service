@@ -168,7 +168,7 @@ async def process_single_image(image_data, filename: str):
 
 # Agregar constantes de límites
 MAX_IMAGES = 15  # Máximo número de imágenes por petición
-MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB por imagen
+MAX_IMAGE_SIZE = 5 * 3840 * 2160
 SUPPORTED_FORMATS = {'image/jpeg', 'image/png'}
 
 # Change @app.post to @router.post
@@ -207,7 +207,7 @@ async def predict_multiple(files: List[UploadFile] = File(...)):
                 results.append({
                     "filename": file.filename,
                     "status": "error",
-                    "error": f"Imagen demasiado grande. Máximo {MAX_IMAGE_SIZE/1024/1024}MB"
+                    "error": f"Imagen demasiado grande. Máximo {MAX_IMAGE_SIZE/3840/2160}KB"
                 })
                 continue
                 
